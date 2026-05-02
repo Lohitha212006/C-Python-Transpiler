@@ -125,10 +125,3 @@ python tests/test_integration.py  # End-to-end tests (Member 3)
 4. **Semantic Checker** — scope analysis, type inference, error collection  
 5. **Code Generator** — visitor pattern walk, emits indented Python with type hints  
 
-## Week 4 Integration Steps
-
-1. Member 1 merges `member1` branch → `main`
-2. Member 2 merges `member2` branch → `main`; connects real parser output to `ast_builder.py`
-3. Member 3 merges `member3` branch → `main`; runs 6 test programs through `main.py`
-4. All 3 members run `python tests/test_integration.py` together — all tests must pass
-5. Demo: `python main.py tests/programs/06_combined.mc` (Fibonacci compiler)
