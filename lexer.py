@@ -1,156 +1,107 @@
-# lexer.py  ── Member 1
-# Converts raw Mini-C source text into a list of tokens.
-# ─────────────────────────────────────────────────────────────────────────────
+"""
+lexer.py — Mini-C Lexer  (Member 1)
+Tokenizes Mini-C source into a list of (type, value, line) tuples.
+"""
 
 import re
+from dataclasses import dataclass
+from typing import List
 
-# ── Token types ───────────────────────────────────────────────────────────────
-TT = {
-    # Keywords
-    "INT": "INT", "FLOAT": "FLOAT", "IF": "IF", "ELSE": "ELSE",
-    "WHILE": "WHILE", "RETURN": "RETURN", "VOID": "VOID",
-    # Literals
-    "INT_LIT": "INT_LIT", "FLOAT_LIT": "FLOAT_LIT",
-    # Identifier
-    "IDENT": "IDENT",
-    # Operators
-    "PLUS": "PLUS", "MINUS": "MINUS", "STAR": "STAR", "SLASH": "SLASH",
-    "ASSIGN": "ASSIGN",
-    "EQ": "EQ", "NEQ": "NEQ",
-    "LEQ": "LEQ", "GEQ": "GEQ", "LT": "LT", "GT": "GT",
-    "AND": "AND", "OR": "OR", "NOT": "NOT",
-    # Delimiters
-    "LPAREN": "LPAREN", "RPAREN": "RPAREN",
-    "LBRACE": "LBRACE", "RBRACE": "RBRACE",
-    "SEMICOLON": "SEMICOLON", "COMMA": "COMMA",
-    # Special
-    "EOF": "EOF",
+# ── Token types ──────────────────────────────────────────────────────────────
+KEYWORDS = {
+    "int", "float", "void", "if", "else", "while", "return",
+    "true", "false",
 }
 
-KEYWORDS = {"int", "float", "if", "else", "while", "return", "void"}
-KEYWORD_MAP = {k: k.upper() for k in KEYWORDS}
-
-# Token spec: list of (token_type, regex) tried in order
 TOKEN_SPEC = [
-    # Comments MUST come before SLASH so  /*  and  //  are never split
-    ("MCOMMENT",   r'/\*.*?\*/'),
-    ("COMMENT",    r'//[^\n]*'),
-    ("FLOAT_LIT",  r'\d+\.\d+'),
-    ("INT_LIT",    r'\d+'),
-    ("IDENT",      r'[A-Za-z_][A-Za-z0-9_]*'),
-    ("EQ",         r'=='),
-    ("NEQ",        r'!='),
-    ("LEQ",        r'<='),
-    ("GEQ",        r'>='),
-    ("AND",        r'&&'),
-    ("OR",         r'\|\|'),
-    ("LT",         r'<'),
-    ("GT",         r'>'),
-    ("ASSIGN",     r'='),
-    ("PLUS",       r'\+'),
-    ("MINUS",      r'-'),
-    ("STAR",       r'\*'),
-    ("SLASH",      r'/'),
-    ("NOT",        r'!'),
-    ("LPAREN",     r'\('),
-    ("RPAREN",     r'\)'),
-    ("LBRACE",     r'\{'),
-    ("RBRACE",     r'\}'),
-    ("SEMICOLON",  r';'),
-    ("COMMA",      r','),
-    ("NEWLINE",    r'\n'),
-    ("SKIP",       r'[ \t\r]+'),
-    ("MISMATCH",   r'.'),
+    ("MCOMMENT",   r"/\*[\s\S]*?\*/"),   # /* ... */  MUST be before SLASH
+    ("COMMENT",    r"//[^\n]*"),          # // ...     MUST be before SLASH
+    ("FLOAT_LIT",  r"\d+\.\d+"),
+    ("INT_LIT",    r"\d+"),
+    ("STRING_LIT", r'"[^"]*"'),
+    ("ID",         r"[A-Za-z_]\w*"),
+    ("LBRACE",     r"\{"),
+    ("RBRACE",     r"\}"),
+    ("LPAREN",     r"\("),
+    ("RPAREN",     r"\)"),
+    ("SEMICOLON",  r";"),
+    ("COMMA",      r","),
+    ("EQ",         r"=="),
+    ("NEQ",        r"!="),
+    ("LEQ",        r"<="),
+    ("GEQ",        r">="),
+    ("LT",         r"<"),
+    ("GT",         r">"),
+    ("ASSIGN",     r"="),
+    ("PLUS",       r"\+"),
+    ("MINUS",      r"-"),
+    ("STAR",       r"\*"),
+    ("SLASH",      r"/"),
+    ("AND",        r"&&"),
+    ("OR",         r"\|\|"),
+    ("NOT",        r"!"),
+    ("NEWLINE",    r"\n"),
+    ("SKIP",       r"[ \t]+"),
+    ("MISMATCH",   r"."),
 ]
 
-MASTER_PATTERN = re.compile(
-    '|'.join(f'(?P<{name}>{pattern})' for name, pattern in TOKEN_SPEC),
-    re.DOTALL,
+MASTER_RE = re.compile(
+    "|".join(f"(?P<{name}>{pattern})" for name, pattern in TOKEN_SPEC)
 )
+
+
+@dataclass
+class Token:
+    type: str
+    value: str
+    line: int
+
+    def __repr__(self):
+        return f"Token({self.type}, {self.value!r}, line={self.line})"
 
 
 class LexerError(Exception):
     pass
 
 
-class Token:
-    __slots__ = ("type", "value", "line")
-
-    def __init__(self, type_: str, value, line: int):
-        self.type  = type_
-        self.value = value
-        self.line  = line
-
-    def __repr__(self):
-        return f"Token({self.type}, {self.value!r}, line={self.line})"
-
-    def to_dict(self):
-        return {"type": self.type, "value": self.value, "line": self.line}
-
-
-class Lexer:
-    """
-    Usage:
-        lexer = Lexer(source_code)
-        tokens = lexer.tokenize()   # list[Token], last token is EOF
-    """
-
-    def __init__(self, source: str):
-        self.source = source
-        self._errors: list[str] = []
-
-    def tokenize(self) -> list[Token]:
-        tokens: list[Token] = []
-        line = 1
-
-        for mo in MASTER_PATTERN.finditer(self.source):
-            kind  = mo.lastgroup
-            value = mo.group()
-
-            if kind == "NEWLINE":
-                line += 1
-                continue
-            elif kind in ("SKIP", "COMMENT", "MCOMMENT"):
-                # Count newlines inside block comments
-                line += value.count('\n')
-                continue
-            elif kind == "MISMATCH":
-                self._errors.append(
-                    f"Line {line}: unexpected character {value!r}"
-                )
-                continue
-            elif kind == "FLOAT_LIT":
-                tokens.append(Token("FLOAT_LIT", float(value), line))
-            elif kind == "INT_LIT":
-                tokens.append(Token("INT_LIT", int(value), line))
-            elif kind == "IDENT":
-                # Promote keywords
-                tok_type = KEYWORD_MAP.get(value, "IDENT")
-                tokens.append(Token(tok_type, value, line))
-            else:
-                tokens.append(Token(kind, value, line))
-
-        tokens.append(Token("EOF", None, line))
-
-        if self._errors:
-            raise LexerError("\n".join(self._errors))
-
-        return tokens
+def tokenize(source: str) -> List[Token]:
+    tokens: List[Token] = []
+    line = 1
+    for mo in MASTER_RE.finditer(source):
+        kind = mo.lastgroup
+        value = mo.group()
+        if kind in ("NEWLINE",):
+            line += 1
+        elif kind in ("SKIP", "COMMENT", "MCOMMENT"):
+            line += value.count("\n")
+        elif kind == "MISMATCH":
+            raise LexerError(f"Unexpected character {value!r} at line {line}")
+        else:
+            if kind == "ID" and value in KEYWORDS:
+                kind = value.upper()   # e.g. "int" → "INT"
+            tokens.append(Token(kind, value, line))
+    tokens.append(Token("EOF", "", line))
+    return tokens
 
 
-# ── Standalone runner ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import sys, json
-
-    if len(sys.argv) < 2:
-        print("Usage: python lexer.py <source.mc>")
-        sys.exit(1)
-
-    src = open(sys.argv[1]).read()
-    try:
-        tokens = Lexer(src).tokenize()
-        for tok in tokens:
-            print(tok)
-    except LexerError as e:
-        print(f"Lexer error:\n{e}", file=sys.stderr)
-        sys.exit(1)
+    src = """
+int add(int a, int b) {
+    return a + b;
+}
+int main() {
+    int x = 5 + 3;
+    float y = 3.14;
+    if (x > 0) {
+        x = x - 1;
+    } else {
+        x = 0;
+    }
+    while (x < 10) {
+        x = x + 1;
+    }
+    return add(x, 2);
+}
+"""
+    for tok in tokenize(src):
+        print(tok)

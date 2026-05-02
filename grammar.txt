@@ -1,78 +1,70 @@
-# grammar.txt  ── Member 1
-# Mini-C EBNF Grammar
-# ─────────────────────────────────────────────────────────────────────────────
+Mini-C Grammar (EBNF)
+=====================
 
-program        → function_decl+
+program         → declaration* EOF
 
-function_decl  → type IDENT '(' params ')' block
+declaration     → func_decl | var_decl
 
-params         → ε
-               | param (',' param)*
+func_decl       → type IDENTIFIER '(' param_list? ')' block
 
-param          → type IDENT
+param_list      → param (',' param)*
+param           → type IDENTIFIER
 
-type           → 'int' | 'float' | 'void'
+var_decl        → type IDENTIFIER ('=' expr)? ';'
 
-block          → '{' statement* '}'
+type            → 'int' | 'float' | 'void'
 
-statement      → var_decl
-               | assign_stmt
-               | if_stmt
-               | while_stmt
-               | return_stmt
-               | expr_stmt
+block           → '{' statement* '}'
 
-var_decl       → type IDENT ('=' expr)? ';'
+statement       → var_decl
+                | if_stmt
+                | while_stmt
+                | return_stmt
+                | expr_stmt
+                | block
 
-assign_stmt    → IDENT '=' expr ';'
+if_stmt         → 'if' '(' expr ')' block ('else' (if_stmt | block))?
 
-if_stmt        → 'if' '(' expr ')' block
-                 ('else' block)?
+while_stmt      → 'while' '(' expr ')' block
 
-while_stmt     → 'while' '(' expr ')' block
+return_stmt     → 'return' expr? ';'
 
-return_stmt    → 'return' expr? ';'
+expr_stmt       → expr ';'
 
-expr_stmt      → expr ';'
+expr            → assign
 
-# ── Expressions (precedence low → high) ──────────────────────────────────────
+assign          → IDENTIFIER '=' assign
+                | or_expr
 
-expr           → or_expr
+or_expr         → and_expr ('||' and_expr)*
 
-or_expr        → and_expr ('||' and_expr)*
+and_expr        → equality ('&&' equality)*
 
-and_expr       → equality ('&&' equality)*
+equality        → relational (('==' | '!=') relational)*
 
-equality       → relational (('==' | '!=') relational)*
+relational      → additive (('<' | '>' | '<=' | '>=') additive)*
 
-relational     → additive (('<' | '>' | '<=' | '>=') additive)*
+additive        → multiplicative (('+' | '-') multiplicative)*
 
-additive       → term (('+' | '-') term)*
+multiplicative  → unary (('*' | '/') unary)*
 
-term           → unary (('*' | '/') unary)*
+unary           → ('!' | '-') unary
+                | primary_call
 
-unary          → ('!' | '-') unary
-               | primary
+primary_call    → primary ('(' arg_list? ')')?     // function call
 
-primary        → INT_LIT
-               | FLOAT_LIT
-               | IDENT '(' args ')'      # function call
-               | IDENT                   # variable reference
-               | '(' expr ')'
+primary         → INT_LITERAL
+                | FLOAT_LITERAL
+                | 'true'
+                | 'false'
+                | IDENTIFIER
+                | '(' expr ')'
 
-args           → ε
-               | expr (',' expr)*
+arg_list        → expr (',' expr)*
 
-# ── Terminals ─────────────────────────────────────────────────────────────────
-
-INT_LIT        → [0-9]+
-FLOAT_LIT      → [0-9]+ '.' [0-9]+
-IDENT          → [A-Za-z_][A-Za-z0-9_]*
-
-# Keywords (not valid as IDENT):
-#   int  float  void  if  else  while  return
-
-# ── Notes ─────────────────────────────────────────────────────────────────────
-# - Comments: // single-line  and  /* multi-line */ are stripped by the lexer.
-# - No pointer types, arrays, structs, or do-while in this subset.
-# - No implicit type casting; Member 2 (semantic checker) handles type errors.
+Tokens
+------
+INT_LITERAL     → [0-9]+
+FLOAT_LITERAL   → [0-9]+ '.' [0-9]+
+IDENTIFIER      → [A-Za-z_][A-Za-z0-9_]*
+Keywords        → int float void if else while return true false

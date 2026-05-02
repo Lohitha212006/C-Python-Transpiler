@@ -1,4 +1,4 @@
-// test3_while.mc  - while loop with accumulator
+// Test 3: While loop
 int sum_to(int n) {
     int total = 0;
     int i = 1;
@@ -10,6 +10,6 @@ int sum_to(int n) {
 }
 
 int main() {
-    int s = sum_to(10);
-    return s;
+    int result = sum_to(10);
+    return result;
 }

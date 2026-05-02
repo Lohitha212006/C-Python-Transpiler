@@ -1,10 +1,10 @@
-// test1_arithmetic.mc  - basic variable declarations and arithmetic
+// Test 1: Arithmetic operations
 int main() {
     int a = 10;
     int b = 3;
     int sum = a + b;
     int diff = a - b;
     int prod = a * b;
-    float ratio = 10.0;
+    int quot = a / b;
     return sum;
 }

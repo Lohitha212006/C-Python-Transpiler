@@ -1,36 +1,10 @@
-# parser.py  ── Member 1
-# Recursive-descent parser. Consumes a token list from lexer.py
-# and produces a parse tree (nested dict) matching interfaces.py.
-# ─────────────────────────────────────────────────────────────────────────────
-#
-# Mini-C Grammar (EBNF)
-# ──────────────────────
-# program        → function_decl+
-# function_decl  → type IDENT '(' params ')' block
-# params         → ε | param (',' param)*
-# param          → type IDENT
-# type           → 'int' | 'float' | 'void'
-# block          → '{' statement* '}'
-# statement      → var_decl | assign_stmt | if_stmt | while_stmt
-#                | return_stmt | expr_stmt
-# var_decl       → type IDENT ('=' expr)? ';'
-# assign_stmt    → IDENT '=' expr ';'
-# if_stmt        → 'if' '(' expr ')' block ('else' block)?
-# while_stmt     → 'while' '(' expr ')' block
-# return_stmt    → 'return' expr? ';'
-# expr_stmt      → expr ';'
-# expr           → or_expr
-# or_expr        → and_expr ('||' and_expr)*
-# and_expr       → equality ('&&' equality)*
-# equality       → relational (('=='|'!=') relational)*
-# relational     → additive  (('<'|'>'|'<='|'>=') additive)*
-# additive       → term (('+' | '-') term)*
-# term           → unary (('*' | '/') unary)*
-# unary          → ('!' | '-') unary | primary
-# primary        → INT_LIT | FLOAT_LIT | IDENT ('(' args ')')? | '(' expr ')'
-# args           → ε | expr (',' expr)*
+"""
+parser.py — Mini-C Recursive Descent Parser  (Member 1)
+Converts token list → parse tree dict matching interfaces.py format.
+"""
 
-from lexer import Lexer, LexerError, Token
+from lexer import Token, tokenize, LexerError
+from typing import List, Any, Dict
 
 
 class ParseError(Exception):
@@ -38,310 +12,301 @@ class ParseError(Exception):
 
 
 class Parser:
-    """
-    Usage:
-        tokens = Lexer(source).tokenize()
-        tree   = Parser(tokens).parse()   # returns parse-tree dict
-    """
+    def __init__(self, tokens: List[Token]):
+        self.tokens = tokens
+        self.pos = 0
 
-    def __init__(self, tokens: list[Token]):
-        self._tokens = tokens
-        self._pos    = 0
+    # ── Helpers ──────────────────────────────────────────────────────────────
+    def current(self) -> Token:
+        return self.tokens[self.pos]
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    def peek(self, offset=1) -> Token:
+        p = self.pos + offset
+        return self.tokens[p] if p < len(self.tokens) else self.tokens[-1]
 
-    def _peek(self) -> Token:
-        return self._tokens[self._pos]
-
-    def _advance(self) -> Token:
-        tok = self._tokens[self._pos]
-        if tok.type != "EOF":
-            self._pos += 1
+    def eat(self, expected_type: str) -> Token:
+        tok = self.current()
+        if tok.type != expected_type:
+            raise ParseError(
+                f"Line {tok.line}: expected {expected_type!r}, got {tok.type!r} ({tok.value!r})"
+            )
+        self.pos += 1
         return tok
 
-    def _check(self, *types) -> bool:
-        return self._peek().type in types
+    def match(self, *types) -> bool:
+        return self.current().type in types
 
-    def _expect(self, *types) -> Token:
-        tok = self._peek()
-        if tok.type not in types:
-            expected = " or ".join(types)
-            raise ParseError(
-                f"Line {tok.line}: expected {expected}, got {tok.type!r} ({tok.value!r})"
-            )
-        return self._advance()
+    # ── Entry ─────────────────────────────────────────────────────────────────
+    def parse_program(self) -> Dict:
+        decls = []
+        while not self.match("EOF"):
+            decls.append(self.parse_top_level())
+        return {"type": "Program", "declarations": decls}
 
-    def _match(self, *types) -> Token | None:
-        if self._check(*types):
-            return self._advance()
-        return None
+    def parse_top_level(self) -> Dict:
+        # type name ( ... ) { ... }  →  FunctionDecl
+        # type name ;  or  type name = expr ;  →  VarDecl
+        type_tok = self.parse_type()
+        name_tok = self.eat("ID")
+        if self.match("LPAREN"):
+            return self.parse_function_decl(type_tok, name_tok)
+        return self.parse_var_decl_tail(type_tok, name_tok)
 
-    def _is_type_keyword(self) -> bool:
-        return self._check("INT", "FLOAT", "VOID")
-
-    # ── Top level ─────────────────────────────────────────────────────────────
-
-    def parse(self) -> dict:
-        functions = []
-        while not self._check("EOF"):
-            functions.append(self._function_decl())
-        if not functions:
-            raise ParseError("Program must contain at least one function.")
-        return {"type": "Program", "functions": functions}
+    def parse_type(self) -> str:
+        tok = self.current()
+        if tok.type in ("INT", "FLOAT", "VOID"):
+            self.pos += 1
+            return tok.value
+        raise ParseError(f"Line {tok.line}: expected type keyword, got {tok.value!r}")
 
     # ── Function declaration ──────────────────────────────────────────────────
-
-    def _function_decl(self) -> dict:
-        ret_type = self._type()
-        name_tok = self._expect("IDENT")
-        self._expect("LPAREN")
-        params = self._params()
-        self._expect("RPAREN")
-        body = self._block()
+    def parse_function_decl(self, return_type: str, name_tok: Token) -> Dict:
+        self.eat("LPAREN")
+        params = []
+        if not self.match("RPAREN"):
+            params = self.parse_param_list()
+        self.eat("RPAREN")
+        body = self.parse_block()
         return {
-            "type":        "FunctionDecl",
-            "return_type": ret_type,
-            "name":        name_tok.value,
-            "params":      params,
-            "body":        body,
-            "line":        name_tok.line,
+            "type": "FunctionDecl",
+            "return_type": return_type,
+            "name": name_tok.value,
+            "params": params,
+            "body": body,
+            "line": name_tok.line,
         }
 
-    def _params(self) -> list[dict]:
+    def parse_param_list(self) -> List[Dict]:
         params = []
-        if self._is_type_keyword():
-            params.append(self._param())
-            while self._match("COMMA"):
-                params.append(self._param())
+        while True:
+            ptype = self.parse_type()
+            pname = self.eat("ID")
+            params.append({"name": pname.value, "var_type": ptype, "line": pname.line})
+            if not self.match("COMMA"):
+                break
+            self.eat("COMMA")
         return params
 
-    def _param(self) -> dict:
-        var_type = self._type()
-        name_tok = self._expect("IDENT")
-        return {"type": "Param", "var_type": var_type, "name": name_tok.value, "line": name_tok.line}
-
-    def _type(self) -> str:
-        tok = self._advance()
-        if tok.type not in ("INT", "FLOAT", "VOID"):
-            raise ParseError(f"Line {tok.line}: expected type keyword, got {tok.type!r}")
-        return tok.value  # "int", "float", "void"
-
     # ── Block & statements ────────────────────────────────────────────────────
-
-    def _block(self) -> dict:
-        self._expect("LBRACE")
+    def parse_block(self) -> Dict:
+        self.eat("LBRACE")
         stmts = []
-        while not self._check("RBRACE", "EOF"):
-            stmts.append(self._statement())
-        self._expect("RBRACE")
+        while not self.match("RBRACE", "EOF"):
+            stmts.append(self.parse_statement())
+        self.eat("RBRACE")
         return {"type": "Block", "statements": stmts}
 
-    def _statement(self) -> dict:
-        tok = self._peek()
-
-        # var declaration: starts with a type keyword followed by IDENT
-        if self._is_type_keyword():
-            # peek two ahead to distinguish  int x  vs  int(  (cast – not supported)
-            return self._var_decl()
-
+    def parse_statement(self) -> Dict:
+        tok = self.current()
+        if tok.type in ("INT", "FLOAT", "VOID"):
+            return self.parse_local_var_decl()
         if tok.type == "IF":
-            return self._if_stmt()
-
+            return self.parse_if()
         if tok.type == "WHILE":
-            return self._while_stmt()
-
+            return self.parse_while()
         if tok.type == "RETURN":
-            return self._return_stmt()
+            return self.parse_return()
+        if tok.type == "LBRACE":
+            return self.parse_block()
+        # assignment or function call
+        return self.parse_expr_stmt()
 
-        # assignment  IDENT '=' expr ';'  or  expr_stmt
-        if tok.type == "IDENT":
-            # look ahead one more token
-            next_pos = self._pos + 1
-            if next_pos < len(self._tokens) and self._tokens[next_pos].type == "ASSIGN":
-                return self._assign_stmt()
+    def parse_local_var_decl(self) -> Dict:
+        type_tok = self.parse_type()
+        name_tok = self.eat("ID")
+        return self.parse_var_decl_tail(type_tok, name_tok)
 
-        return self._expr_stmt()
-
-    def _var_decl(self) -> dict:
-        var_type = self._type()
-        name_tok = self._expect("IDENT")
+    def parse_var_decl_tail(self, var_type: str, name_tok: Token) -> Dict:
         value = None
-        if self._match("ASSIGN"):
-            value = self._expr()
-        self._expect("SEMICOLON")
-        return {
-            "type":     "VarDecl",
-            "var_type": var_type,
-            "name":     name_tok.value,
-            "value":    value,
-            "line":     name_tok.line,
-        }
+        if self.match("ASSIGN"):
+            self.eat("ASSIGN")
+            value = self.parse_expr()
+        self.eat("SEMICOLON")
+        node = {"type": "VarDecl", "var_type": var_type, "name": name_tok.value, "line": name_tok.line}
+        if value is not None:
+            node["value"] = value
+        return node
 
-    def _assign_stmt(self) -> dict:
-        name_tok = self._expect("IDENT")
-        self._expect("ASSIGN")
-        value = self._expr()
-        self._expect("SEMICOLON")
-        return {
-            "type":  "AssignStmt",
-            "name":  name_tok.value,
-            "value": value,
-            "line":  name_tok.line,
-        }
-
-    def _if_stmt(self) -> dict:
-        line = self._peek().line
-        self._expect("IF")
-        self._expect("LPAREN")
-        condition = self._expr()
-        self._expect("RPAREN")
-        then_block = self._block()
+    def parse_if(self) -> Dict:
+        line = self.current().line
+        self.eat("IF")
+        self.eat("LPAREN")
+        cond = self.parse_expr()
+        self.eat("RPAREN")
+        then_block = self.parse_block()
         else_block = None
-        if self._match("ELSE"):
-            else_block = self._block()
-        return {
-            "type":       "IfStmt",
-            "condition":  condition,
-            "then_block": then_block,
-            "else_block": else_block,
-            "line":       line,
-        }
+        if self.match("ELSE"):
+            self.eat("ELSE")
+            if self.match("IF"):
+                else_block = self.parse_if()
+            else:
+                else_block = self.parse_block()
+        node = {"type": "IfStmt", "condition": cond, "then": then_block, "line": line}
+        if else_block:
+            node["else"] = else_block
+        return node
 
-    def _while_stmt(self) -> dict:
-        line = self._peek().line
-        self._expect("WHILE")
-        self._expect("LPAREN")
-        condition = self._expr()
-        self._expect("RPAREN")
-        body = self._block()
-        return {"type": "WhileStmt", "condition": condition, "body": body, "line": line}
+    def parse_while(self) -> Dict:
+        line = self.current().line
+        self.eat("WHILE")
+        self.eat("LPAREN")
+        cond = self.parse_expr()
+        self.eat("RPAREN")
+        body = self.parse_block()
+        return {"type": "WhileStmt", "condition": cond, "body": body, "line": line}
 
-    def _return_stmt(self) -> dict:
-        line = self._peek().line
-        self._expect("RETURN")
+    def parse_return(self) -> Dict:
+        line = self.current().line
+        self.eat("RETURN")
         value = None
-        if not self._check("SEMICOLON"):
-            value = self._expr()
-        self._expect("SEMICOLON")
-        return {"type": "ReturnStmt", "value": value, "line": line}
+        if not self.match("SEMICOLON"):
+            value = self.parse_expr()
+        self.eat("SEMICOLON")
+        node = {"type": "ReturnStmt", "line": line}
+        if value is not None:
+            node["value"] = value
+        return node
 
-    def _expr_stmt(self) -> dict:
-        expr = self._expr()
-        self._expect("SEMICOLON")
-        return {"type": "ExprStmt", "expr": expr, "line": expr.get("line", 0)}
+    def parse_expr_stmt(self) -> Dict:
+        # Could be: name = expr ;   OR   name(args) ;
+        expr = self.parse_expr()
+        self.eat("SEMICOLON")
+        return {"type": "ExprStmt", "expr": expr}
 
-    # ── Expression hierarchy (operator precedence) ────────────────────────────
+    # ── Expressions (Pratt-like with precedence levels) ───────────────────────
+    def parse_expr(self) -> Dict:
+        return self.parse_assign()
 
-    def _expr(self) -> dict:
-        return self._or_expr()
-
-    def _or_expr(self) -> dict:
-        left = self._and_expr()
-        while self._check("OR"):
-            op_tok = self._advance()
-            right  = self._and_expr()
-            left   = {"type": "BinaryOp", "op": "||", "left": left, "right": right, "line": op_tok.line}
+    def parse_assign(self) -> Dict:
+        left = self.parse_or()
+        if self.match("ASSIGN") and left["type"] == "Identifier":
+            self.eat("ASSIGN")
+            right = self.parse_assign()
+            return {"type": "Assign", "name": left["name"], "value": right, "line": left["line"]}
         return left
 
-    def _and_expr(self) -> dict:
-        left = self._equality()
-        while self._check("AND"):
-            op_tok = self._advance()
-            right  = self._equality()
-            left   = {"type": "BinaryOp", "op": "&&", "left": left, "right": right, "line": op_tok.line}
+    def parse_or(self) -> Dict:
+        left = self.parse_and()
+        while self.match("OR"):
+            op = self.tokens[self.pos].value; self.pos += 1
+            right = self.parse_and()
+            left = {"type": "BinaryOp", "op": op, "left": left, "right": right}
         return left
 
-    def _equality(self) -> dict:
-        left = self._relational()
-        while self._check("EQ", "NEQ"):
-            op_tok = self._advance()
-            right  = self._relational()
-            left   = {"type": "BinaryOp", "op": op_tok.value, "left": left, "right": right, "line": op_tok.line}
+    def parse_and(self) -> Dict:
+        left = self.parse_equality()
+        while self.match("AND"):
+            op = self.tokens[self.pos].value; self.pos += 1
+            right = self.parse_equality()
+            left = {"type": "BinaryOp", "op": op, "left": left, "right": right}
         return left
 
-    def _relational(self) -> dict:
-        left = self._additive()
-        while self._check("LT", "GT", "LEQ", "GEQ"):
-            op_tok = self._advance()
-            right  = self._additive()
-            left   = {"type": "BinaryOp", "op": op_tok.value, "left": left, "right": right, "line": op_tok.line}
+    def parse_equality(self) -> Dict:
+        left = self.parse_relational()
+        while self.match("EQ", "NEQ"):
+            op = self.tokens[self.pos].value; self.pos += 1
+            right = self.parse_relational()
+            left = {"type": "BinaryOp", "op": op, "left": left, "right": right}
         return left
 
-    def _additive(self) -> dict:
-        left = self._term()
-        while self._check("PLUS", "MINUS"):
-            op_tok = self._advance()
-            right  = self._term()
-            left   = {"type": "BinaryOp", "op": op_tok.value, "left": left, "right": right, "line": op_tok.line}
+    def parse_relational(self) -> Dict:
+        left = self.parse_additive()
+        while self.match("LT", "GT", "LEQ", "GEQ"):
+            op = self.tokens[self.pos].value; self.pos += 1
+            right = self.parse_additive()
+            left = {"type": "BinaryOp", "op": op, "left": left, "right": right}
         return left
 
-    def _term(self) -> dict:
-        left = self._unary()
-        while self._check("STAR", "SLASH"):
-            op_tok = self._advance()
-            right  = self._unary()
-            left   = {"type": "BinaryOp", "op": op_tok.value, "left": left, "right": right, "line": op_tok.line}
+    def parse_additive(self) -> Dict:
+        left = self.parse_multiplicative()
+        while self.match("PLUS", "MINUS"):
+            op = self.tokens[self.pos].value; self.pos += 1
+            right = self.parse_multiplicative()
+            left = {"type": "BinaryOp", "op": op, "left": left, "right": right}
         return left
 
-    def _unary(self) -> dict:
-        if self._check("NOT", "MINUS"):
-            op_tok = self._advance()
-            operand = self._unary()
-            return {"type": "UnaryOp", "op": op_tok.value, "operand": operand, "line": op_tok.line}
-        return self._primary()
+    def parse_multiplicative(self) -> Dict:
+        left = self.parse_unary()
+        while self.match("STAR", "SLASH"):
+            op = self.tokens[self.pos].value; self.pos += 1
+            right = self.parse_unary()
+            left = {"type": "BinaryOp", "op": op, "left": left, "right": right}
+        return left
 
-    def _primary(self) -> dict:
-        tok = self._peek()
+    def parse_unary(self) -> Dict:
+        if self.match("NOT"):
+            op = self.tokens[self.pos].value; self.pos += 1
+            operand = self.parse_unary()
+            return {"type": "UnaryOp", "op": op, "operand": operand}
+        if self.match("MINUS"):
+            self.pos += 1
+            operand = self.parse_unary()
+            return {"type": "UnaryOp", "op": "-", "operand": operand}
+        return self.parse_call_or_primary()
 
+    def parse_call_or_primary(self) -> Dict:
+        node = self.parse_primary()
+        if node["type"] == "Identifier" and self.match("LPAREN"):
+            self.eat("LPAREN")
+            args = []
+            if not self.match("RPAREN"):
+                args.append(self.parse_expr())
+                while self.match("COMMA"):
+                    self.eat("COMMA")
+                    args.append(self.parse_expr())
+            self.eat("RPAREN")
+            return {"type": "FunctionCall", "name": node["name"], "args": args, "line": node["line"]}
+        return node
+
+    def parse_primary(self) -> Dict:
+        tok = self.current()
         if tok.type == "INT_LIT":
-            self._advance()
-            return {"type": "Literal", "var_type": "int", "value": tok.value, "line": tok.line}
-
+            self.pos += 1
+            return {"type": "Literal", "value": int(tok.value), "inferred_type": "int", "line": tok.line}
         if tok.type == "FLOAT_LIT":
-            self._advance()
-            return {"type": "Literal", "var_type": "float", "value": tok.value, "line": tok.line}
-
-        if tok.type == "IDENT":
-            self._advance()
-            # function call?
-            if self._match("LPAREN"):
-                args = self._args()
-                self._expect("RPAREN")
-                return {"type": "FunctionCall", "name": tok.value, "args": args, "line": tok.line}
+            self.pos += 1
+            return {"type": "Literal", "value": float(tok.value), "inferred_type": "float", "line": tok.line}
+        if tok.type in ("TRUE", "FALSE"):
+            self.pos += 1
+            return {"type": "Literal", "value": tok.value == "true", "inferred_type": "bool", "line": tok.line}
+        if tok.type == "STRING_LIT":
+            self.pos += 1
+            return {"type": "Literal", "value": tok.value[1:-1], "inferred_type": "string", "line": tok.line}
+        if tok.type == "ID":
+            self.pos += 1
             return {"type": "Identifier", "name": tok.value, "line": tok.line}
-
         if tok.type == "LPAREN":
-            self._advance()
-            expr = self._expr()
-            self._expect("RPAREN")
+            self.eat("LPAREN")
+            expr = self.parse_expr()
+            self.eat("RPAREN")
             return expr
-
-        raise ParseError(
-            f"Line {tok.line}: unexpected token {tok.type!r} ({tok.value!r}) in expression"
-        )
-
-    def _args(self) -> list[dict]:
-        args = []
-        if not self._check("RPAREN"):
-            args.append(self._expr())
-            while self._match("COMMA"):
-                args.append(self._expr())
-        return args
+        raise ParseError(f"Line {tok.line}: unexpected token {tok.type!r} ({tok.value!r})")
 
 
-# ── Standalone runner ─────────────────────────────────────────────────────────
+def parse(source: str) -> Dict:
+    tokens = tokenize(source)
+    return Parser(tokens).parse_program()
+
+
 if __name__ == "__main__":
-    import sys, json
-
-    if len(sys.argv) < 2:
-        print("Usage: python parser.py <source.mc>")
-        sys.exit(1)
-
-    src = open(sys.argv[1]).read()
-    try:
-        tokens = Lexer(src).tokenize()
-        tree   = Parser(tokens).parse()
-        print(json.dumps(tree, indent=2))
-    except (LexerError, ParseError) as e:
-        print(f"Error:\n{e}", file=sys.stderr)
-        sys.exit(1)
+    import json
+    src = """
+int add(int a, int b) {
+    return a + b;
+}
+int main() {
+    int x = 5 + 3;
+    float y = 3.14;
+    if (x > 0) {
+        x = x - 1;
+    } else {
+        x = 0;
+    }
+    while (x < 10) {
+        x = x + 1;
+    }
+    return add(x, 2);
+}
+"""
+    tree = parse(src)
+    print(json.dumps(tree, indent=2))
