@@ -125,3 +125,11 @@ python tests/test_integration.py  # End-to-end tests (Member 3)
 4. **Semantic Checker** — scope analysis, type inference, error collection  
 5. **Code Generator** — visitor pattern walk, emits indented Python with type hints  
 
+**UI:**
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/bab236c0-d725-4bf5-98ed-0102566b5f9a" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/632c129f-dc11-4b0a-aa86-d6b98fa3e845" />
+**AST Visulization**
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/3d3c2f9a-3da6-4850-9d82-0d7d5f02a868" />
+**Symbol Table**
+<img width="649" height="812" alt="image" src="https://github.com/user-attachments/assets/ba1a1d4d-5e8c-4b9e-8253-231a227a772d" />
+
